@@ -88,6 +88,18 @@ body {
     color: white;
 }
 
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.toolbar-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
 .app-main {
     flex: 1;
     display: flex;

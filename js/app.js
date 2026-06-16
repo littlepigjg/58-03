@@ -128,10 +128,19 @@ const App = (() => {
             if (!file) return;
             IOManager.importJson(file).then(function(data) {
                 LayoutManager.setState({ blocks: data.blocks, selectedId: null, selectedColId: null });
+                LayoutManager.clearHistory();
             }).catch(function(err) {
                 alert(err.message);
             });
             fileInput.value = '';
+        });
+
+        document.getElementById('btn-undo').addEventListener('click', function() {
+            LayoutManager.undo();
+        });
+
+        document.getElementById('btn-redo').addEventListener('click', function() {
+            LayoutManager.redo();
         });
 
         document.getElementById('btn-clear').addEventListener('click', function() {
@@ -146,7 +155,26 @@ const App = (() => {
             if (confirm('确定要重置本地缓存吗？\n\n这将清空所有已保存的编辑内容，恢复到空白状态。')) {
                 clearStateFromStorage();
                 LayoutManager.clearAll();
+                LayoutManager.clearHistory();
                 alert('本地缓存已重置！');
+            }
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (!e.ctrlKey && !e.metaKey) return;
+
+            const activeElement = document.activeElement;
+            const tagName = activeElement ? activeElement.tagName.toLowerCase() : '';
+            if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+                return;
+            }
+
+            if (e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                LayoutManager.undo();
+            } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+                e.preventDefault();
+                LayoutManager.redo();
             }
         });
 
@@ -431,8 +459,15 @@ const App = (() => {
                         if (block && block.type !== 'columns') {
                             const newBlock = JSON.parse(JSON.stringify(block));
                             newBlock.id = 'block_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            const history = LayoutManager;
+                            if (history.beginBatch) {
+                                history.beginBatch();
+                            }
                             LayoutManager.addBlockToColumn(parentBlockId, colId, newBlock);
                             LayoutManager.removeBlock(draggingBlockId);
+                            if (history.endBatch) {
+                                history.endBatch();
+                            }
                         }
                     }
                     clearDragState();
@@ -684,7 +719,6 @@ const App = (() => {
                 }
 
                 if (parentBlockId && colId) {
-                    LayoutManager.updateColumnBlock(parentBlockId, colId, blockId, {});
                     LayoutManager.updateColumnBlock(parentBlockId, colId, blockId, { [field]: value });
                 } else {
                     LayoutManager.updateBlock(blockId, { [field]: value });

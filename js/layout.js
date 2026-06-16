@@ -4,6 +4,7 @@ const LayoutManager = (() => {
     let onChangeCallback = null;
     let onSelectCallback = null;
     let selectedColId = null;
+    let history = null;
 
     function init(initialState, callbacks) {
         onChangeCallback = callbacks.onChange || (() => {});
@@ -15,10 +16,36 @@ const LayoutManager = (() => {
         );
 
         selectedColId = null;
+
+        history = HistoryManager.createManager(
+            {
+                getState,
+                getBlockIndex,
+                findBlockByIdRecursive,
+                getColumnBlockIndex,
+                _internalAddBlock,
+                _internalAddBlockToColumn,
+                _internalRemoveBlock,
+                _internalRemoveBlockFromColumn,
+                _internalMoveBlock,
+                _internalMoveBlockInColumn,
+                _internalUpdateBlock,
+                _internalUpdateColumnBlock,
+                _internalHandleColumnCountChange,
+                _internalClearAll,
+                _internalSetBlocks,
+                _internalSetState
+            },
+            onHistoryChange
+        );
     }
 
     function onMainListChange(blocks) {
         onChangeCallback(getState());
+    }
+
+    function onHistoryChange() {
+        updateUndoRedoUI();
     }
 
     function getState() {
@@ -29,11 +56,16 @@ const LayoutManager = (() => {
         };
     }
 
-    function setState(newState) {
+    function _internalSetState(newState) {
         mainList.setBlocks(newState.blocks || []);
         mainList.setSelectedId(newState.selectedId || null);
         selectedColId = newState.selectedColId || null;
         onChangeCallback(getState());
+    }
+
+    function setState(newState) {
+        const oldState = JSON.parse(JSON.stringify(getState()));
+        history.setState(newState, oldState);
     }
 
     function selectBlock(blockId, colId) {
@@ -57,33 +89,68 @@ const LayoutManager = (() => {
         return mainList.getBlockIndex(blockId);
     }
 
-    function addBlock(block, targetIndex) {
+    function _internalAddBlock(block, targetIndex) {
         mainList.addBlock(block, targetIndex);
     }
 
-    function removeBlock(blockId) {
+    function addBlock(block, targetIndex) {
+        history.addBlock(block, targetIndex);
+        selectBlock(block.id, null);
+    }
+
+    function _internalRemoveBlock(blockId) {
         mainList.removeBlock(blockId);
         if (selectedColId && !mainList.getBlockById(blockId)) {
             selectedColId = null;
         }
     }
 
-    function moveBlock(fromIndex, toIndex) {
+    function removeBlock(blockId) {
+        const selected = getSelectedInfo();
+        if (selected.blockId === blockId) {
+            selectBlock(null, null);
+        }
+        history.removeBlock(blockId);
+    }
+
+    function _internalMoveBlock(fromIndex, toIndex) {
         mainList.moveBlock(fromIndex, toIndex);
     }
 
-    function updateBlock(blockId, data) {
+    function moveBlock(fromIndex, toIndex) {
+        if (fromIndex === toIndex) return;
+        history.moveBlock(fromIndex, toIndex);
+    }
+
+    function _internalUpdateBlock(blockId, data) {
         mainList.updateBlock(blockId, data);
     }
 
-    function duplicateBlock(blockId) {
-        mainList.duplicateBlock(blockId);
+    function updateBlock(blockId, data) {
+        const block = mainList.getBlockById(blockId);
+        if (!block) return;
+        const oldData = {};
+        for (const key of Object.keys(data)) {
+            oldData[key] = block.data[key];
+        }
+        history.updateBlock(blockId, data, oldData);
     }
 
-    function clearAll() {
+    function _internalSetBlocks(newBlocks) {
+        mainList.setBlocks(newBlocks);
+    }
+
+    function _internalClearAll() {
         mainList.clear();
         selectedColId = null;
         selectBlock(null, null);
+    }
+
+    function clearAll() {
+        const state = getState();
+        if (state.blocks.length === 0) return;
+        selectBlock(null, null);
+        history.clearAll();
     }
 
     function syncColumnBlocksToMain(blockId, colId, newColumnBlocks) {
@@ -123,13 +190,18 @@ const LayoutManager = (() => {
         );
     }
 
-    function addBlockToColumn(blockId, colId, newBlock, targetIndex) {
+    function _internalAddBlockToColumn(blockId, colId, newBlock, targetIndex) {
         const colMgr = getColumnManager(blockId, colId);
         if (!colMgr) return;
         colMgr.addBlock(newBlock, targetIndex);
     }
 
-    function removeBlockFromColumn(blockId, colId, childBlockId) {
+    function addBlockToColumn(blockId, colId, newBlock, targetIndex) {
+        history.addBlockToColumn(blockId, colId, newBlock, targetIndex);
+        selectBlock(newBlock.id, colId);
+    }
+
+    function _internalRemoveBlockFromColumn(blockId, colId, childBlockId) {
         const colMgr = getColumnManager(blockId, colId);
         if (!colMgr) return;
         colMgr.removeBlock(childBlockId);
@@ -140,22 +212,85 @@ const LayoutManager = (() => {
         }
     }
 
-    function moveBlockInColumn(blockId, colId, fromIndex, toIndex) {
+    function removeBlockFromColumn(blockId, colId, childBlockId) {
+        const selected = getSelectedInfo();
+        if (selected.blockId === childBlockId) {
+            selectBlock(null, null);
+        }
+        history.removeBlockFromColumn(blockId, colId, childBlockId);
+    }
+
+    function _internalMoveBlockInColumn(blockId, colId, fromIndex, toIndex) {
         const colMgr = getColumnManager(blockId, colId);
         if (!colMgr) return;
         colMgr.moveBlock(fromIndex, toIndex);
     }
 
-    function updateColumnBlock(blockId, colId, childBlockId, data) {
+    function moveBlockInColumn(blockId, colId, fromIndex, toIndex) {
+        if (fromIndex === toIndex) return;
+        history.moveBlockInColumn(blockId, colId, fromIndex, toIndex);
+    }
+
+    function _internalUpdateColumnBlock(blockId, colId, childBlockId, data) {
         const colMgr = getColumnManager(blockId, colId);
         if (!colMgr) return;
         colMgr.updateBlock(childBlockId, data);
     }
 
+    function updateColumnBlock(blockId, colId, childBlockId, data) {
+        const info = findBlockByIdRecursive(childBlockId);
+        if (!info || !info.block) return;
+        const oldData = {};
+        for (const key of Object.keys(data)) {
+            oldData[key] = info.block.data[key];
+        }
+        history.updateColumnBlock(blockId, colId, childBlockId, data, oldData);
+    }
+
+    function duplicateBlock(blockId) {
+        const index = getBlockIndex(blockId);
+        if (index === -1) return;
+        const original = mainList.getBlockById(blockId);
+        if (!original) return;
+        const copy = JSON.parse(JSON.stringify(original));
+        copy.id = 'block_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        function regenerateIds(obj) {
+            if (obj && typeof obj === 'object') {
+                if (obj.id) {
+                    obj.id = 'block_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                }
+                if (obj.data && obj.data.children) {
+                    obj.data.children = obj.data.children.map(col => {
+                        if (col.blocks) {
+                            col.blocks = col.blocks.map(b => {
+                                const nb = JSON.parse(JSON.stringify(b));
+                                regenerateIds(nb);
+                                return nb;
+                            });
+                        }
+                        return col;
+                    });
+                }
+            }
+        }
+        regenerateIds(copy);
+
+        history.duplicateBlock(blockId, copy, index + 1);
+        selectBlock(copy.id, null);
+    }
+
     function duplicateColumnBlock(blockId, colId, childBlockId) {
-        const colMgr = getColumnManager(blockId, colId);
-        if (!colMgr) return;
-        colMgr.duplicateBlock(childBlockId);
+        const colIndex = getColumnBlockIndex(blockId, colId, childBlockId);
+        if (colIndex === -1) return;
+        const info = findBlockByIdRecursive(childBlockId);
+        if (!info || !info.block) return;
+
+        const copy = JSON.parse(JSON.stringify(info.block));
+        copy.id = 'block_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        history.duplicateColumnBlock(blockId, colId, copy, colIndex + 1);
+        selectBlock(copy.id, colId);
     }
 
     function getColumnBlockIndex(blockId, colId, childBlockId) {
@@ -164,7 +299,7 @@ const LayoutManager = (() => {
         return colMgr.getBlockIndex(childBlockId);
     }
 
-    function handleColumnCountChange(blockId, newCount) {
+    function _internalHandleColumnCountChange(blockId, newCount) {
         const block = mainList.getBlockById(blockId);
         if (!block || block.type !== 'columns') return;
 
@@ -181,7 +316,14 @@ const LayoutManager = (() => {
             newChildren.pop();
         }
 
-        updateBlock(blockId, { columns: targetCount, children: newChildren });
+        _internalUpdateBlock(blockId, { columns: targetCount, children: newChildren });
+    }
+
+    function handleColumnCountChange(blockId, newCount) {
+        const block = mainList.getBlockById(blockId);
+        if (!block || block.type !== 'columns') return;
+        const oldChildren = JSON.parse(JSON.stringify(block.data.children || []));
+        history.handleColumnCountChange(blockId, newCount, oldChildren);
     }
 
     function findBlockByIdRecursive(blockId) {
@@ -251,6 +393,50 @@ const LayoutManager = (() => {
         selectBlock(blockId, info.colId);
     }
 
+    function undo() {
+        return history.undo();
+    }
+
+    function redo() {
+        return history.redo();
+    }
+
+    function canUndo() {
+        return history.canUndo();
+    }
+
+    function canRedo() {
+        return history.canRedo();
+    }
+
+    function clearHistory() {
+        history.clear();
+    }
+
+    function getHistoryStatus() {
+        return history.getStatus();
+    }
+
+    function updateUndoRedoUI() {
+        const status = getHistoryStatus();
+        const undoBtn = document.getElementById('btn-undo');
+        const redoBtn = document.getElementById('btn-redo');
+        if (undoBtn) undoBtn.disabled = !status.canUndo;
+        if (redoBtn) redoBtn.disabled = !status.canRedo;
+    }
+
+    function beginBatch() {
+        history.beginBatch();
+    }
+
+    function endBatch(recordHistory = true) {
+        history.endBatch(recordHistory);
+    }
+
+    function cancelBatch() {
+        history.cancelBatch();
+    }
+
     return {
         init,
         getState,
@@ -277,6 +463,16 @@ const LayoutManager = (() => {
         findBlockByIdRecursive,
         updateAnyBlock,
         deleteAnyBlock,
-        duplicateAnyBlock
+        duplicateAnyBlock,
+        undo,
+        redo,
+        canUndo,
+        canRedo,
+        clearHistory,
+        getHistoryStatus,
+        updateUndoRedoUI,
+        beginBatch,
+        endBatch,
+        cancelBatch
     };
 })();

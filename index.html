@@ -29,7 +29,11 @@
         <section class="editor-area">
             <div class="editor-toolbar">
                 <span class="toolbar-title">编辑区</span>
-                <button id="btn-clear" class="btn btn-small btn-danger">清空</button>
+                <div class="toolbar-actions">
+                    <button id="btn-undo" class="btn btn-small" title="撤销 (Ctrl+Z)" disabled>↶ 撤销</button>
+                    <button id="btn-redo" class="btn btn-small" title="重做 (Ctrl+Y)" disabled>↷ 重做</button>
+                    <button id="btn-clear" class="btn btn-small btn-danger">清空</button>
+                </div>
             </div>
             <div id="editor-canvas" class="editor-canvas">
                 <div class="empty-hint">
@@ -65,6 +69,7 @@
     <script src="js/components.js"></script>
     <script src="js/templateEngine.js"></script>
     <script src="js/blockList.js"></script>
+    <script src="js/history.js"></script>
     <script src="js/layout.js"></script>
     <script src="js/preview.js"></script>
     <script src="js/io.js"></script>
